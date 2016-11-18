@@ -46,6 +46,8 @@ Once can use --regex functionality, for example not to dump mysql and test datab
 Of course, regex functionality can be used to describe pretty much any list of tables.
 
 ##Recommad Usage for TiDB
-./mydumper -h host -u user -p passwd -P port -B db -F 1 -t 1 -o ./dir
-./myloader -h host -u user -p passwd -P port -t 16 -q 1 -d ./dir
+```shell
+mydumper -h host -u user -p passwd -P port -B db -F 1 -t 1 -o ./dir
 
+myloader -h host -u user -p passwd -P port -t 16 -q 1 -d ./dir
+```

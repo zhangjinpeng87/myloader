@@ -149,7 +149,7 @@ int main(int argc, char *argv[]) {
 		mysql_query(conn, "SET SQL_LOG_BIN=0");
 
 	mysql_query(conn, "/*!40014 SET FOREIGN_KEY_CHECKS=0*/");
-        mysql_query(conn, "set @@session.tidb_skip_constraint_check=1;");
+	mysql_query(conn, "set @@session.tidb_skip_constraint_check=1;");
 	conf.queue= g_async_queue_new();
 	conf.ready= g_async_queue_new();
 

@@ -28,6 +28,7 @@
 #include <stdarg.h>
 #include <errno.h>
 #include <zlib.h>
+#include <dirent.h>
 #include "common.h"
 #include "myloader.h"
 #include "config.h"
@@ -148,6 +149,7 @@ int main(int argc, char *argv[]) {
 		mysql_query(conn, "SET SQL_LOG_BIN=0");
 
 	mysql_query(conn, "/*!40014 SET FOREIGN_KEY_CHECKS=0*/");
+        mysql_query(conn, "set @@session.tidb_skip_constraint_check=1;");
 	conf.queue= g_async_queue_new();
 	conf.ready= g_async_queue_new();
 
@@ -194,43 +196,51 @@ int main(int argc, char *argv[]) {
 }
 
 void restore_databases(struct configuration *conf, MYSQL *conn) {
-	GError *error= NULL;
-	GDir* dir= g_dir_open(directory, 0, &error);
+	int count, n;
+        struct dirent **namelist;
+        char *filename;
 
-	if (error) {
-		g_critical("cannot open directory %s, %s\n", directory, error->message);
-		errors++;
-		return;
-	}
-
-	const gchar* filename= NULL;
-
-	while((filename= g_dir_read_name(dir))) {
+	// restore schema in sort
+        count = scandir(directory, &namelist, 0, alphasort);
+        if (count < 0) {
+		g_critical("cannot open directory %s, error: %s\n", directory, strerror(count));
+        }
+        n = 0;
+        while (n < count) {
+                filename = namelist[n]->d_name;
 		if (!source_db || g_str_has_prefix(filename, g_strdup_printf("%s.", source_db))){
-			if (g_strrstr(filename, "-schema.sql")) {
-				add_schema(filename, conn);
-			}
-		}
-	}
+                        if (g_strrstr(filename, "-schema.sql")) {
+                                add_schema(filename, conn);
+                        }
+                }
+                free(namelist[n]);
+		n++;
+        }
+        free(namelist);
 
-	g_dir_rewind(dir);
-
-	while((filename= g_dir_read_name(dir))) {
-		if (!source_db || g_str_has_prefix(filename, g_strdup_printf("%s.", source_db))){
-			if (!g_strrstr(filename, "-schema.sql")
-			 && !g_strrstr(filename, "-schema-view.sql")
-			 && !g_strrstr(filename, "-schema-triggers.sql")
-			 && !g_strrstr(filename, "-schema-post.sql")
-			 && !g_strrstr(filename, "-schema-create.sql")
-			 && g_strrstr(filename, ".sql")) {
-				add_table(filename, conf);
-			}
-		}
-	}
-
-	g_dir_close(dir);
+	// restore data in sort
+        count = scandir(directory, &namelist, 0, alphasort);
+        if (count < 0) {
+            g_critical("cannot open directory %s, error: %s\n", directory, strerror(count));
+        }
+        n = 0;
+        while (n < count) {
+                filename = namelist[n]->d_name;
+                if (!source_db || g_str_has_prefix(filename, g_strdup_printf("%s.", source_db))){
+                        if (!g_strrstr(filename, "-schema.sql")
+                         && !g_strrstr(filename, "-schema-view.sql")
+                         && !g_strrstr(filename, "-schema-triggers.sql")
+                         && !g_strrstr(filename, "-schema-post.sql")
+                         && !g_strrstr(filename, "-schema-create.sql")
+                         && g_strrstr(filename, ".sql")) {
+                                add_table(filename, conf);
+                        }
+                }
+		free(namelist[n]);
+		n++;
+        }
+        free(namelist);
 }
-
 
 void restore_schema_view(MYSQL *conn){
 	GError *error= NULL;
@@ -425,6 +435,7 @@ void *process_queue(struct thread_data *td) {
 	mysql_query(thrconn, "/*!40101 SET NAMES binary*/");
 	mysql_query(thrconn, "/*!40101 SET SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */");
 	mysql_query(thrconn, "/*!40014 SET UNIQUE_CHECKS=0 */");
+        mysql_query(thrconn, "set @@session.tidb_skip_constraint_check=1;");
 	mysql_query(thrconn, "SET autocommit=0");
 
 	g_async_queue_push(conf->ready, GINT_TO_POINTER(1));

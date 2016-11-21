@@ -33,7 +33,8 @@
 #include "myloader.h"
 #include "config.h"
 
-guint commit_count= 1000;
+guint commit_count= 1;
+guint max_retry_count= 10;
 gchar *directory= NULL;
 gboolean overwrite_tables= FALSE;
 gboolean enable_binlog= FALSE;
@@ -58,11 +59,12 @@ void create_database(MYSQL *conn, gchar *database);
 static GOptionEntry entries[] =
 {
 	{ "directory", 'd', 0, G_OPTION_ARG_STRING, &directory, "Directory of the dump to import", NULL },
-	{ "queries-per-transaction", 'q', 0, G_OPTION_ARG_INT, &commit_count, "Number of queries per transaction, default 1000", NULL },
+	{ "queries-per-transaction", 'q', 0, G_OPTION_ARG_INT, &commit_count, "Number of queries per transaction, default 1", NULL },
 	{ "overwrite-tables", 'o', 0, G_OPTION_ARG_NONE, &overwrite_tables, "Drop tables if they already exist", NULL },
 	{ "database", 'B', 0, G_OPTION_ARG_STRING, &db, "An alternative database to restore into", NULL },
 	{ "source-db", 's', 0, G_OPTION_ARG_STRING, &source_db, "Database to restore", NULL },
 	{ "enable-binlog", 'e', 0, G_OPTION_ARG_NONE, &enable_binlog, "Enable binary logging of the restore data", NULL },
+	{ "max-retry-count", 'r', 0, G_OPTION_ARG_INT, &commit_count, "Enable retry when commit failed, only valid  when queries-per-transaction=1, default 10", NULL },
 	{ NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL }
 };
 
@@ -475,11 +477,20 @@ void *process_queue(struct thread_data *td) {
 	return NULL;
 }
 
+int retry(MYSQL *conn, char *data, int len) {
+	mysql_query(conn, "START TRANSACTION");
+	if (mysql_real_query(conn, data->str, data->len)) {
+		return 1;
+	}
+	return mysql_query(conn, "COMMIT");
+}
+
 void restore_data(MYSQL *conn, char *database, char *table, const char *filename, gboolean is_schema, gboolean need_use) {
 	void *infile;
 	gboolean is_compressed= FALSE;
 	gboolean eof= FALSE;
 	guint query_counter= 0;
+	guint retry_count= 0;
 	GString *data= g_string_sized_new(512);
 
 	gchar* path= g_build_filename(directory, filename, NULL);
@@ -512,7 +523,6 @@ void restore_data(MYSQL *conn, char *database, char *table, const char *filename
 		g_free(query);
 	}
 
-	
 	if (!is_schema)
 		mysql_query(conn, "START TRANSACTION");
 
@@ -529,11 +539,25 @@ void restore_data(MYSQL *conn, char *database, char *table, const char *filename
 				if (!is_schema &&(query_counter == commit_count)) {
 					query_counter= 0;
 					if (mysql_query(conn, "COMMIT")) {
-						g_critical("Error committing data for %s.%s: %s", db ? db : database, table, mysql_error(conn));
-						errors++;
-						return;
+						if (commit_count == 1) {
+							while (retry_count < max_retry_count) {
+								if (!retry(conn, data->str, data->len))
+									break;
+								retry_count++;
+							}
+							if (retry_count >= max_retry_count) {
+								g_critical("Error committing data for %s.%s (%s): %s", db ? db : database, table, filename, mysql_error(conn));
+								errors++;
+								return;
+							}
+						} else {
+							g_critical("Error committing data for %s.%s (%s): %s", db ? db : database, table, filename, mysql_error(conn));
+							errors++;
+							return;
+						}
 					}
 					mysql_query(conn, "START TRANSACTION");
+					retry_count = 0;
 				}
 
 				g_string_set_size(data, 0);

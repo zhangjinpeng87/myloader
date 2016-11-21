@@ -539,6 +539,7 @@ void restore_data(MYSQL *conn, char *database, char *table, const char *filename
 				if (!is_schema &&(query_counter == commit_count)) {
 					query_counter= 0;
 					if (mysql_query(conn, "COMMIT")) {
+						// Commit failed, retry
 						if (commit_count == 1) {
 							while (retry_count < max_retry_count) {
 								if (!retry(conn, data->str, data->len))

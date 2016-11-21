@@ -479,7 +479,7 @@ void *process_queue(struct thread_data *td) {
 
 int retry(MYSQL *conn, char *data, int len) {
 	mysql_query(conn, "START TRANSACTION");
-	if (mysql_real_query(conn, data->str, data->len)) {
+	if (mysql_real_query(conn, data, len)) {
 		return 1;
 	}
 	return mysql_query(conn, "COMMIT");
